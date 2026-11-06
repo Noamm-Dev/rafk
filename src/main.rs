@@ -1,35 +1,29 @@
 mod auth;
-mod chat;
 mod client;
 mod config;
 mod conn;
+mod utils;
 
-use std::{
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::{path::PathBuf, time::{Duration, Instant}};
 
 use anyhow::Result;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-use crate::{auth::Auth, chat::AutoResponder, config::Config};
+use crate::{auth::Auth, config::Config, utils::chat::AutoResponder};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let config_path: PathBuf = std::env::args().nth(1).unwrap_or_else(|| "config.toml".into()).into();
     let config = Config::load(&config_path)?;
-
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let mut auth = Auth::new(&config.auth)?;
     let mut responder = AutoResponder::new(&config.chat.rules)?;
     let (chat_tx, mut chat_rx) = mpsc::channel(16);
-    if config.stdin {
-        spawn_stdin_reader(chat_tx.clone());
-    }
+    if config.stdin { spawn_stdin_reader(chat_tx.clone()) }
 
     tokio::select! {
         result = reconnect_loop(&config, &mut auth, &mut responder, &mut chat_rx) => result,
@@ -40,14 +34,10 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn reconnect_loop(
-    config: &Config,
-    auth: &mut Auth,
-    responder: &mut AutoResponder,
-    chat_rx: &mut mpsc::Receiver<String>,
-) -> Result<()> {
+async fn reconnect_loop(config: &Config, auth: &mut Auth, responder: &mut AutoResponder, chat_rx: &mut mpsc::Receiver<String>) -> Result<()> {
     let reconnect = &config.reconnect;
     let mut attempt = 0;
+
     loop {
         let started = Instant::now();
         match client::run(config, auth, responder, chat_rx).await {
@@ -61,9 +51,7 @@ async fn reconnect_loop(
             Err(err) => warn!("connection error: {err:#}"),
         }
 
-        if started.elapsed() >= Duration::from_secs(reconnect.stable_after_secs) {
-            attempt = 0;
-        }
+        if started.elapsed() >= Duration::from_secs(reconnect.stable_after_secs) { attempt = 0 }
         let delay = reconnect.delay(attempt);
         attempt += 1;
         info!("reconnecting in {}s", delay.as_secs());
@@ -71,15 +59,12 @@ async fn reconnect_loop(
     }
 }
 
-// A plain thread rather than tokio::io::stdin, whose blocking read can stall runtime shutdown.
 fn spawn_stdin_reader(chat_tx: mpsc::Sender<String>) {
     std::thread::spawn(move || {
         for line in std::io::stdin().lines() {
             let Ok(line) = line else { break };
             let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
+            if line.is_empty() { continue }
             if chat_tx.blocking_send(line.to_string()).is_err() {
                 break;
             }
@@ -89,7 +74,7 @@ fn spawn_stdin_reader(chat_tx: mpsc::Sender<String>) {
 
 #[cfg(unix)]
 async fn shutdown_signal() {
-    use tokio::signal::unix::{SignalKind, signal};
+    use tokio::signal::unix::{signal, SignalKind};
 
     let Ok(mut terminate) = signal(SignalKind::terminate()) else {
         let _ = tokio::signal::ctrl_c().await;

@@ -6,7 +6,6 @@ use serde_json::Value;
 
 use crate::config::ChatRule;
 
-/// Turns a chat component (JSON or legacy text) into plain text without formatting codes.
 pub fn parse(json: &str) -> String {
     match serde_json::from_str::<Value>(json) {
         Ok(value) => {
@@ -25,34 +24,23 @@ fn append(value: &Value, out: &mut String) {
         Value::Bool(flag) => out.push_str(&flag.to_string()),
         Value::Array(items) => items.iter().for_each(|item| append(item, out)),
         Value::Object(object) => {
-            if let Some(text) = object.get("text").and_then(Value::as_str) {
-                out.push_str(text);
-            }
+            if let Some(text) = object.get("text").and_then(Value::as_str) { out.push_str(text) }
             if let Some(key) = object.get("translate").and_then(Value::as_str) {
-                let args: Vec<String> = object
-                    .get("with")
-                    .and_then(Value::as_array)
-                    .map(|args| {
-                        args.iter()
-                            .map(|arg| {
-                                let mut text = String::new();
-                                append(arg, &mut text);
-                                text
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let args: Vec<String> = object.get("with").and_then(Value::as_array).map(|args| {
+                    args.iter().map(|arg| {
+                        let mut text = String::new();
+                        append(arg, &mut text);
+                        text
+                    }).collect() 
+                }).unwrap_or_default();
                 out.push_str(&translate(key, &args));
             }
-            if let Some(extra) = object.get("extra") {
-                append(extra, out);
-            }
+            if let Some(extra) = object.get("extra") { append(extra, out) }
         }
         Value::Null => {}
     }
 }
 
-// Only the keys a 1.8 server realistically sends; anything else falls back to "key args...".
 fn translate(key: &str, args: &[String]) -> String {
     let template = match key {
         "chat.type.text" => "<%s> %s",
@@ -105,17 +93,15 @@ pub struct AutoResponder {
 
 impl AutoResponder {
     pub fn new(rules: &[ChatRule]) -> Result<Self> {
-        let rules = rules
-            .iter()
-            .map(|rule| {
-                Ok(Rule {
-                    pattern: Regex::new(&rule.pattern).with_context(|| format!("invalid chat rule pattern {:?}", rule.pattern))?,
-                    reply: rule.reply.clone(),
-                    cooldown: Duration::from_secs(rule.cooldown_secs),
-                    last_fired: None,
-                })
+        let rules = rules.iter().map(|rule| {
+            Ok(Rule {
+                pattern: Regex::new(&rule.pattern).with_context(|| format!("invalid chat rule pattern {:?}", rule.pattern))?,
+                reply: rule.reply.clone(),
+                cooldown: Duration::from_secs(rule.cooldown_secs),
+                last_fired: None,
             })
-            .collect::<Result<_>>()?;
+        }).collect::<Result<_>>()?;
+        
         Ok(Self { rules })
     }
 
@@ -123,9 +109,7 @@ impl AutoResponder {
     pub fn respond(&mut self, message: &str) -> Option<String> {
         let now = Instant::now();
         for rule in &mut self.rules {
-            if rule.last_fired.is_some_and(|last| now.duration_since(last) < rule.cooldown) {
-                continue;
-            }
+            if rule.last_fired.is_some_and(|last| now.duration_since(last) < rule.cooldown) { continue }
             let Some(captures) = rule.pattern.captures(message) else { continue };
 
             let mut reply = String::new();
@@ -168,7 +152,10 @@ mod tests {
         }];
         let mut responder = AutoResponder::new(&rules).unwrap();
 
-        assert_eq!(responder.respond("From [VIP] Steve: you there?").as_deref(), Some("/msg Steve I'm AFK"));
+        assert_eq!(
+            responder.respond("From [VIP] Steve: you there?").as_deref(),
+            Some("/msg Steve I'm AFK")
+        );
         assert_eq!(responder.respond("From Alex: hello?"), None);
         assert_eq!(responder.respond("unrelated"), None);
     }

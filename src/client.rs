@@ -1,20 +1,19 @@
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use rand::rngs::OsRng;
-use rsa::{Pkcs1v15Encrypt, RsaPublicKey, pkcs8::DecodePublicKey};
-use tokio::{
-    net::TcpStream,
-    sync::mpsc,
-    time::{self, MissedTickBehavior, timeout},
-};
+use rsa::{pkcs8::DecodePublicKey, Pkcs1v15Encrypt, RsaPublicKey};
+use tokio::{net::TcpStream, sync::mpsc, time::{self, timeout, MissedTickBehavior}};
 use tracing::{debug, info, warn};
 
 use crate::{
     auth::Auth,
-    chat::{self, AutoResponder},
     config::Config,
-    conn::{Connection, Reader, Writer},
+    conn::Connection,
+    utils::{
+        chat::{self, AutoResponder},
+        codec::{Reader, Writer},
+    },
 };
 
 const PROTOCOL_VERSION: i32 = 47; // Minecraft 1.8.9
@@ -23,7 +22,10 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 const TICK: Duration = Duration::from_millis(50);
 const MAX_CHAT_LEN: usize = 100;
-const LIMBO_MESSAGES: [&str; 2] = ["You were spawned in Limbo.", "You are AFK. Move around to return from AFK."];
+const LIMBO_MESSAGES: [&str; 2] = [
+    "You were spawned in Limbo.",
+    "You are AFK. Move around to return from AFK.",
+];
 
 mod login {
     pub const DISCONNECT: i32 = 0x00;
@@ -82,19 +84,12 @@ struct Position {
 }
 
 /// Runs one connection until the server disconnects us. `Ok` carries the kick reason, `Err` a network/auth failure.
-pub async fn run(
-    config: &Config,
-    auth: &mut Auth,
-    responder: &mut AutoResponder,
-    chat_rx: &mut mpsc::Receiver<String>,
-) -> Result<String> {
+pub async fn run(config: &Config, auth: &mut Auth, responder: &mut AutoResponder, chat_rx: &mut mpsc::Receiver<String>) -> Result<String> {
     auth.login().await?;
     let mut session = Session::connect(config, auth.name()).await?;
 
     let kicked = timeout(LOGIN_TIMEOUT, session.login(auth)).await.context("login timed out")??;
-    if let Some(reason) = kicked {
-        return Ok(reason);
-    }
+    if let Some(reason) = kicked { return Ok(reason) }
     session.play(responder, chat_rx).await
 }
 
@@ -110,17 +105,25 @@ impl<'a> Session<'a> {
         let server = &config.server;
         info!("connecting to {}:{} as {name}", server.host, server.port);
 
-        let stream = timeout(CONNECT_TIMEOUT, TcpStream::connect((server.host.as_str(), server.port)))
-            .await
-            .context("connect timed out")??;
+        let stream = timeout(CONNECT_TIMEOUT, TcpStream::connect((server.host.as_str(), server.port))).await.context("connect timed out")??;
         stream.set_nodelay(true)?;
 
         let mut conn = Connection::new(stream);
-        let handshake = Writer::default().varint(PROTOCOL_VERSION).string(&server.host).u16(server.port).varint(2);
+        let handshake = Writer::default()
+            .varint(PROTOCOL_VERSION)
+            .string(&server.host)
+            .u16(server.port)
+            .varint(2);
+
         conn.write_packet(serverbound::HANDSHAKE, &handshake.0).await?;
         conn.write_packet(login::START, &Writer::default().string(name).0).await?;
 
-        Ok(Self { config, conn, position: None, ticks_since_position: 0 })
+        Ok(Self {
+            config,
+            conn,
+            position: None,
+            ticks_since_position: 0,
+        })
     }
 
     async fn login(&mut self, auth: &mut Auth) -> Result<Option<String>> {
@@ -154,20 +157,18 @@ impl<'a> Session<'a> {
         let response = Writer::default()
             .byte_array(&key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &secret)?)
             .byte_array(&key.encrypt(&mut OsRng, Pkcs1v15Encrypt, verify_token)?);
+
         self.conn.write_packet(login::ENCRYPTION_RESPONSE, &response.0).await?;
         self.conn.enable_encryption(&secret);
         Ok(())
     }
 
     async fn play(&mut self, responder: &mut AutoResponder, chat_rx: &mut mpsc::Receiver<String>) -> Result<String> {
-        while let Ok(line) = chat_rx.try_recv() {
-            warn!("dropping chat typed while disconnected: {line}");
-        }
+        while let Ok(line) = chat_rx.try_recv() { warn!("dropping chat typed while disconnected: {line}") }
 
         let mut tick = time::interval(TICK);
         tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut last_packet = Instant::now();
-        // Once per connection, not per JoinGame: Hypixel may re-send JoinGame when moving us to Limbo.
         let join_commands = time::sleep(Duration::from_secs(self.config.join_commands_delay_secs));
         tokio::pin!(join_commands);
         let mut join_commands_pending = !self.config.join_commands.is_empty();
@@ -177,14 +178,10 @@ impl<'a> Session<'a> {
                 packet = self.conn.read_packet(clientbound::ALL) => {
                     let (id, data) = packet?;
                     last_packet = Instant::now();
-                    if let Some(reason) = self.handle(id, &data, responder).await? {
-                        return Ok(reason);
-                    }
+                    if let Some(reason) = self.handle(id, &data, responder).await? { return Ok(reason) }
                 }
                 _ = tick.tick() => {
-                    if last_packet.elapsed() > READ_TIMEOUT {
-                        bail!("timed out: no packets from server for {}s", READ_TIMEOUT.as_secs());
-                    }
+                    if last_packet.elapsed() > READ_TIMEOUT { bail!("timed out: no packets from server for {}s", READ_TIMEOUT.as_secs()) }
                     self.send_movement().await?;
                 }
                 _ = &mut join_commands, if join_commands_pending => {
@@ -205,7 +202,6 @@ impl<'a> Session<'a> {
             }
             clientbound::JOIN_GAME => self.on_join_game().await?,
             clientbound::CHAT => self.on_chat(&mut reader, responder).await?,
-            // Hypixel moves players between servers with Respawn; wait for the next teleport before moving again.
             clientbound::RESPAWN => self.position = None,
             clientbound::POSITION_LOOK => self.on_position(&mut reader).await?,
             clientbound::CONFIRM_TRANSACTION => self.on_transaction(&mut reader).await?,
@@ -218,7 +214,6 @@ impl<'a> Session<'a> {
     }
 
     async fn on_join_game(&mut self) -> Result<()> {
-        info!("joined game");
         let settings = Writer::default().string("en_US").i8(2).varint(0).bool(true).u8(0x7f);
         self.conn.write_packet(serverbound::CLIENT_SETTINGS, &settings.0).await?;
         let brand = Writer::default().string("MC|Brand").string("vanilla");
@@ -226,25 +221,16 @@ impl<'a> Session<'a> {
     }
 
     async fn send_join_commands(&mut self) -> Result<()> {
-        let config = self.config;
-        for command in &config.join_commands {
-            info!(%command, "running join command");
-            self.send_chat(command).await?;
-        }
+        for command in &self.config.join_commands { self.send_chat(command).await? }
         Ok(())
     }
 
     async fn on_chat(&mut self, reader: &mut Reader<'_>, responder: &mut AutoResponder) -> Result<()> {
         let message = chat::parse(reader.string()?);
-        // Position 2 is the action bar, which Hypixel updates constantly.
-        if reader.i8()? == 2 || message.trim().is_empty() {
-            return Ok(());
-        }
+        if reader.i8()? == 2 || message.trim().is_empty() { return Ok(()) }
 
         info!(target: "chat", "{message}");
-        if LIMBO_MESSAGES.iter().any(|limbo| message.contains(limbo)) {
-            info!("now in Limbo");
-        }
+        if LIMBO_MESSAGES.iter().any(|limbo| message.contains(limbo)) { info!("now in Limbo") }
 
         let Some(reply) = responder.respond(&message) else { return Ok(()) };
         info!(%reply, "auto-reply");
@@ -263,12 +249,10 @@ impl<'a> Session<'a> {
             y: if relative(0x02) { old.y + y } else { y },
             z: if relative(0x04) { old.z + z } else { z },
             yaw: if relative(0x08) { old.yaw + yaw } else { yaw },
-            pitch: if relative(0x10) { old.pitch + pitch } else { pitch },
+            pitch: if relative(0x10) { old.pitch + pitch } else { pitch }
         };
         self.position = Some(position);
-        debug!(position.x, position.y, position.z, "teleported");
 
-        // 1.8 has no teleport confirm; the vanilla client echoes the position back instead.
         let echo = Writer::default()
             .f64(position.x)
             .f64(position.y)
@@ -279,27 +263,20 @@ impl<'a> Session<'a> {
         self.conn.write_packet(serverbound::POSITION_LOOK, &echo.0).await
     }
 
-    // Anti-cheats (Grim, Watchdog) ping with unaccepted transactions to track client latency;
-    // vanilla answers every one of them, and ignoring them makes the server distrust our position.
     async fn on_transaction(&mut self, reader: &mut Reader<'_>) -> Result<()> {
         let window_id = reader.i8()?;
         let action = reader.i16()?;
-        if reader.u8()? != 0 {
-            return Ok(());
-        }
+        if reader.u8()? != 0 { return Ok(()) }
         let reply = Writer::default().i8(window_id).i16(action).bool(true);
         self.conn.write_packet(serverbound::CONFIRM_TRANSACTION, &reply.0).await
     }
 
+    // todo check if its is even needed
     async fn on_resource_pack(&mut self, reader: &mut Reader<'_>) -> Result<()> {
-        let url = reader.string()?;
         let hash = reader.string()?.to_string();
         let accept = self.config.resource_pack.accept;
-        info!(%url, accept, "resource pack requested");
 
-        if !accept {
-            return self.send_pack_status(&hash, 1).await;
-        }
+        if !accept { return self.send_pack_status(&hash, 1).await }
         self.send_pack_status(&hash, 3).await?;
         self.send_pack_status(&hash, 0).await
     }
@@ -309,8 +286,6 @@ impl<'a> Session<'a> {
         self.conn.write_packet(serverbound::RESOURCE_PACK_STATUS, &packet.0).await
     }
 
-    // Mirrors 1.8 vanilla: an on-ground packet every tick, and a position reminder once
-    // 20 of them have gone by (Grim's BadPacketsV flags a reminder that comes any sooner).
     async fn send_movement(&mut self) -> Result<()> {
         let Some(position) = self.position else { return Ok(()) };
 
