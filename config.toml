@@ -1,6 +1,9 @@
 # tracing filter, e.g. "info", "debug", "info,chat=off". RUST_LOG overrides it.
 log_level = "info"
 
+# Log every action the client takes (chat sent/received).
+debug = true
+
 # Read chat lines / commands from stdin.
 stdin = true
 
@@ -10,7 +13,7 @@ join_commands = ["/limbo", "/w noamm Meow!"]
 join_commands_delay_secs = 5
 
 [server]
-host = "mc.hypixel.net"
+host = "mc.noamm.org"
 port = 25565
 
 [auth]

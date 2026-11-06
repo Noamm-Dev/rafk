@@ -23,9 +23,8 @@ const READ_TIMEOUT: Duration = Duration::from_secs(60);
 const TICK: Duration = Duration::from_millis(50);
 const JOIN_COMMAND_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_CHAT_LEN: usize = 100;
-const LIMBO_MESSAGES: [&str; 3] = [
+const LIMBO_MESSAGES: [&str; 2] = [
     "You were spawned in Limbo.",
-    "/limbo for more information.",
     "You are AFK. Move around to return from AFK.",
 ];
 
@@ -213,6 +212,7 @@ impl<'a> Session<'a> {
     }
 
     async fn on_join_game(&mut self) -> Result<()> {
+        debug!("joined game, sending client settings and brand");
         let settings = Writer::default().string("en_US").i8(2).varint(0).bool(true).u8(0x7f);
         self.conn.write_packet(serverbound::CLIENT_SETTINGS, &settings.0).await?;
         let brand = Writer::default().string("MC|Brand").string("vanilla");
@@ -222,12 +222,14 @@ impl<'a> Session<'a> {
     async fn on_chat(&mut self, reader: &mut Reader<'_>, responder: &mut AutoResponder) -> Result<()> {
         let message = chat::parse(reader.string()?);
         if reader.i8()? == 2 || message.trim().is_empty() { return Ok(()) }
+        debug!(%message, "[CHAT]");
 
-        info!(target: "chat", "{message}");
-        if LIMBO_MESSAGES.iter().any(|limbo| message.contains(limbo)) { info!("now in Limbo") }
+        if LIMBO_MESSAGES.iter().any(|limbo | message.contains(limbo)) {
+            info!("Joined Limbo lobby!")
+        }
 
         let Some(reply) = responder.respond(&message) else { return Ok(()) };
-        info!(%reply, "auto-reply");
+        debug!(%reply, "auto-reply");
         self.send_chat(&reply).await
     }
 

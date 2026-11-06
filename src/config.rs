@@ -5,6 +5,7 @@ use std::{path::{Path, PathBuf}, time::Duration};
 #[derive(Deserialize)]
 pub struct Config {
     pub log_level: String,
+    pub debug: bool,
     pub stdin: bool,
     pub join_commands: Vec<String>,
     pub join_commands_delay_secs: u64,

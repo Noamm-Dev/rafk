@@ -17,7 +17,8 @@ use crate::{auth::Auth, config::Config, utils::chat::AutoResponder};
 async fn main() -> Result<()> {
     let config_path: PathBuf = std::env::args().nth(1).unwrap_or_else(|| "config.toml".into()).into();
     let config = Config::load(&config_path)?;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level));
+    let mut filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level));
+    if config.debug { filter = filter.add_directive("rafk=debug".parse()?) }
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let mut auth = Auth::new(&config.auth)?;
