@@ -21,9 +21,11 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 const TICK: Duration = Duration::from_millis(50);
+const JOIN_COMMAND_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_CHAT_LEN: usize = 100;
-const LIMBO_MESSAGES: [&str; 2] = [
+const LIMBO_MESSAGES: [&str; 3] = [
     "You were spawned in Limbo.",
+    "/limbo for more information.",
     "You are AFK. Move around to return from AFK.",
 ];
 
@@ -80,7 +82,6 @@ struct Position {
     pitch: f32,
 }
 
-/// Runs one connection until the server disconnects us. `Ok` carries the kick reason, `Err` a network/auth failure.
 pub async fn run(config: &Config, auth: &mut Auth, responder: &mut AutoResponder, chat_rx: &mut mpsc::Receiver<String>) -> Result<String> {
     auth.login().await?;
     let mut session = Session::connect(config, auth.name()).await?;
@@ -168,7 +169,8 @@ impl<'a> Session<'a> {
         let mut last_packet = Instant::now();
         let join_commands = time::sleep(Duration::from_secs(self.config.join_commands_delay_secs));
         tokio::pin!(join_commands);
-        let mut join_commands_pending = !self.config.join_commands.is_empty();
+        let join_command_list = &self.config.join_commands;
+        let mut next_join_command = 0;
 
         loop {
             tokio::select! {
@@ -181,9 +183,10 @@ impl<'a> Session<'a> {
                     if last_packet.elapsed() > READ_TIMEOUT { bail!("timed out: no packets from server for {}s", READ_TIMEOUT.as_secs()) }
                     self.send_movement().await?;
                 }
-                _ = &mut join_commands, if join_commands_pending => {
-                    join_commands_pending = false;
-                    self.send_join_commands().await?;
+                _ = &mut join_commands, if next_join_command < join_command_list.len() => {
+                    self.send_chat(&join_command_list[next_join_command]).await?;
+                    next_join_command += 1;
+                    join_commands.as_mut().reset(time::Instant::now() + JOIN_COMMAND_INTERVAL);
                 }
                 Some(line) = chat_rx.recv() => self.send_chat(&line).await?,
             }
@@ -214,11 +217,6 @@ impl<'a> Session<'a> {
         self.conn.write_packet(serverbound::CLIENT_SETTINGS, &settings.0).await?;
         let brand = Writer::default().string("MC|Brand").string("vanilla");
         self.conn.write_packet(serverbound::PLUGIN_MESSAGE, &brand.0).await
-    }
-
-    async fn send_join_commands(&mut self) -> Result<()> {
-        for command in &self.config.join_commands { self.send_chat(command).await? }
-        Ok(())
     }
 
     async fn on_chat(&mut self, reader: &mut Reader<'_>, responder: &mut AutoResponder) -> Result<()> {

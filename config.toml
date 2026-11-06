@@ -1,15 +1,13 @@
-# rafk — headless Minecraft 1.8.9 AFK client
-
 # tracing filter, e.g. "info", "debug", "info,chat=off". RUST_LOG overrides it.
 log_level = "info"
 
-# Read chat lines / commands from stdin (ignored automatically under systemd, where stdin is /dev/null).
+# Read chat lines / commands from stdin.
 stdin = true
 
-# Chat lines sent once per connection, join_commands_delay_secs after logging in.
-# On Hypixel this sends you to Limbo; if the command ever fails, idling in a lobby still gets you there.
-join_commands = ["/limbo"]
-join_commands_delay_secs = 10
+# Chat messages sent once per connection, join_commands_delay_secs after logging in.
+# Commands have 2s cooldown between them
+join_commands = ["/limbo", "/w noamm Meow!"]
+join_commands_delay_secs = 5
 
 [server]
 host = "mc.hypixel.net"
@@ -28,12 +26,17 @@ backoff_secs = [5, 10, 30, 60]
 stable_after_secs = 120
 # Case-insensitive substrings of a kick reason that stop the client instead of reconnecting.
 # "logged in from another location" = you joined on your real client; reconnecting would kick you.
-fatal_kick_patterns = ["logged in from another location", "banned"]
+fatal_kick_patterns = ["logged in from another location"]
 
 # Auto-responder: first rule whose regex matches the plain-text message (and is off cooldown) replies.
 # $1 / ${name} in the reply expand to capture groups. Every reply is chat automation; use sparingly.
-#
-# [[chat.rules]]
-# pattern = '^From (?:\[[^\]]+\] )?(\w+): '
-# reply = "/r I'm AFK right now"
-# cooldown_secs = 300
+
+[[chat.rules]]
+pattern = '^From (?:\[[^\]]+\] )?(\w+): '
+reply = "/r I'm AFK right now"
+cooldown_secs = 300
+
+[[chat.rules]]
+pattern = '^From (?:\[[^\]]+\] )?(\w+): .*\bping\b'
+reply = "/r pong"
+cooldown_secs = 10
