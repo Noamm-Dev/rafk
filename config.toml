@@ -9,11 +9,11 @@ stdin = true
 
 # Chat messages sent once per connection, join_commands_delay_secs after logging in.
 # Commands have 2s cooldown between them
-join_commands = ["/limbo", "/w noamm Meow!"]
+join_commands = ["/limbo"]
 join_commands_delay_secs = 5
 
 [server]
-host = "mc.noamm.org"
+host = "mc.hypixel.net"
 port = 25565
 
 [auth]
