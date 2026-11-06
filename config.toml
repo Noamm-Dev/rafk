@@ -1,0 +1,43 @@
+# rafk — headless Minecraft 1.8.9 AFK client
+
+# tracing filter, e.g. "info", "debug", "info,chat=off". RUST_LOG overrides it.
+log_level = "info"
+
+# Read chat lines / commands from stdin (ignored automatically under systemd, where stdin is /dev/null).
+stdin = true
+
+# Chat lines sent once per connection, join_commands_delay_secs after logging in.
+# On Hypixel this sends you to Limbo; if the command ever fails, idling in a lobby still gets you there.
+join_commands = ["/limbo"]
+join_commands_delay_secs = 10
+
+[server]
+host = "mc.hypixel.net"
+port = 25565
+
+[auth]
+# Holds the Microsoft refresh token and Minecraft access token. Keep it private.
+cache_path = "token.json"
+# Official Minecraft launcher client id (pre-authorized for Xbox Live; works with the device code flow).
+client_id = "00000000402b5328"
+
+[reconnect]
+# Delay per consecutive failed attempt; the last value is the cap.
+backoff_secs = [5, 10, 30, 60]
+# A connection that lasted this long resets the backoff.
+stable_after_secs = 120
+# Case-insensitive substrings of a kick reason that stop the client instead of reconnecting.
+# "logged in from another location" = you joined on your real client; reconnecting would kick you.
+fatal_kick_patterns = ["logged in from another location", "banned"]
+
+[resource_pack]
+# true: report the pack as accepted + loaded (nothing is downloaded). false: decline.
+accept = true
+
+# Auto-responder: first rule whose regex matches the plain-text message (and is off cooldown) replies.
+# $1 / ${name} in the reply expand to capture groups. Every reply is chat automation; use sparingly.
+#
+# [[chat.rules]]
+# pattern = '^From (?:\[[^\]]+\] )?(\w+): '
+# reply = "/r I'm AFK right now"
+# cooldown_secs = 300
