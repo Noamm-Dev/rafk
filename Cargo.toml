@@ -5,19 +5,19 @@ edition = "2024"
 description = "Headless Minecraft 1.8.9 AFK client for Hypixel Limbo"
 
 [dependencies]
-aes = "0.8"
+aes = "0.9.4"
 anyhow = "1"
-cfb8 = "0.8"
+cfb8 = "0.9.1"
 flate2 = "1"
-rand = "0.8"
+rand = "0.10.3"
 regex = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "form", "rustls"] }
 rsa = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha1 = "0.10"
+sha1 = "0.11.0"
 tokio = { version = "1", features = ["rt", "net", "io-util", "time", "macros", "sync", "signal"] }
-toml = "0.8"
+toml = "1.2.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

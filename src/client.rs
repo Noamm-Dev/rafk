@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
-use rand::rngs::OsRng;
+use rsa::rand_core::OsRng;
 use rsa::{pkcs8::DecodePublicKey, Pkcs1v15Encrypt, RsaPublicKey};
 use tokio::{net::TcpStream, sync::mpsc, time::{self, timeout, MissedTickBehavior}};
 use tracing::{debug, info, warn};
@@ -25,7 +25,7 @@ const JOIN_COMMAND_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_CHAT_LEN: usize = 100;
 const LIMBO_MESSAGES: [&str; 2] = [
     "You were spawned in Limbo.",
-    "You are AFK. Move around to return from AFK.",
+    "You are AFK. Move around to return from AFK."
 ];
 
 mod login {

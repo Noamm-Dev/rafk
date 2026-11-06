@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use aes::Aes128;
 use anyhow::{bail, ensure, Context, Result};
-use cfb8::cipher::{generic_array::GenericArray, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use cfb8::cipher::{BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, };
 
@@ -24,15 +24,15 @@ struct Cipher {
 
 impl Cipher {
     fn new(secret: &[u8; 16]) -> Self {
-        let key = GenericArray::from_slice(secret);
+        let key = secret.into();
         Self {
             encryptor: cfb8::Encryptor::new(key, key),
             decryptor: cfb8::Decryptor::new(key, key),
         }
     }
 
-    fn encrypt(&mut self, buf: &mut [u8]) { for byte in buf { self.encryptor.encrypt_block_mut(GenericArray::from_mut_slice(std::slice::from_mut(byte))) } }
-    fn decrypt(&mut self, buf: &mut [u8]) { for byte in buf { self.decryptor.decrypt_block_mut(GenericArray::from_mut_slice(std::slice::from_mut(byte))) } }
+    fn encrypt(&mut self, buf: &mut [u8]) { for byte in buf { self.encryptor.encrypt_block(std::array::from_mut(byte).into()) } }
+    fn decrypt(&mut self, buf: &mut [u8]) { for byte in buf { self.decryptor.decrypt_block(std::array::from_mut(byte).into()) } }
 }
 
 impl Connection {
