@@ -47,7 +47,6 @@ mod clientbound {
     pub const CONFIRM_TRANSACTION: i32 = 0x32;
     pub const DISCONNECT: i32 = 0x40;
     pub const SET_COMPRESSION: i32 = 0x46;
-    pub const RESOURCE_PACK: i32 = 0x48;
     pub const ALL: &[i32] = &[
         KEEP_ALIVE,
         JOIN_GAME,
@@ -57,7 +56,6 @@ mod clientbound {
         CONFIRM_TRANSACTION,
         DISCONNECT,
         SET_COMPRESSION,
-        RESOURCE_PACK,
     ];
 }
 
@@ -71,7 +69,6 @@ mod serverbound {
     pub const CONFIRM_TRANSACTION: i32 = 0x0F;
     pub const CLIENT_SETTINGS: i32 = 0x15;
     pub const PLUGIN_MESSAGE: i32 = 0x17;
-    pub const RESOURCE_PACK_STATUS: i32 = 0x19;
 }
 
 #[derive(Clone, Copy, Default)]
@@ -207,7 +204,6 @@ impl<'a> Session<'a> {
             clientbound::CONFIRM_TRANSACTION => self.on_transaction(&mut reader).await?,
             clientbound::DISCONNECT => return Ok(Some(chat::parse(reader.string()?))),
             clientbound::SET_COMPRESSION => self.conn.set_compression(reader.varint()?),
-            clientbound::RESOURCE_PACK => self.on_resource_pack(&mut reader).await?,
             _ => {}
         }
         Ok(None)
@@ -269,21 +265,6 @@ impl<'a> Session<'a> {
         if reader.u8()? != 0 { return Ok(()) }
         let reply = Writer::default().i8(window_id).i16(action).bool(true);
         self.conn.write_packet(serverbound::CONFIRM_TRANSACTION, &reply.0).await
-    }
-
-    // todo check if its is even needed
-    async fn on_resource_pack(&mut self, reader: &mut Reader<'_>) -> Result<()> {
-        let hash = reader.string()?.to_string();
-        let accept = self.config.resource_pack.accept;
-
-        if !accept { return self.send_pack_status(&hash, 1).await }
-        self.send_pack_status(&hash, 3).await?;
-        self.send_pack_status(&hash, 0).await
-    }
-
-    async fn send_pack_status(&mut self, hash: &str, status: i32) -> Result<()> {
-        let packet = Writer::default().string(hash).varint(status);
-        self.conn.write_packet(serverbound::RESOURCE_PACK_STATUS, &packet.0).await
     }
 
     async fn send_movement(&mut self) -> Result<()> {

@@ -11,7 +11,6 @@ pub struct Config {
     pub server: ServerConfig,
     pub auth: AuthConfig,
     pub reconnect: ReconnectConfig,
-    pub resource_pack: ResourcePackConfig,
     #[serde(default)]
     pub chat: ChatConfig,
 }
@@ -33,11 +32,6 @@ pub struct ReconnectConfig {
     pub backoff_secs: Vec<u64>,
     pub stable_after_secs: u64,
     pub fatal_kick_patterns: Vec<String>,
-}
-
-#[derive(Deserialize)]
-pub struct ResourcePackConfig {
-    pub accept: bool,
 }
 
 #[derive(Deserialize, Default)]
